@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using InboxOutbox.Contracts;
+using InboxOutbox.Entities;
 using InboxOutbox.EntityFrameworkCore;
+using InboxOutbox.Events;
 using InboxOutbox.Extensions;
 using InboxOutbox.Implementations;
 using InboxOutbox.Options;
@@ -38,7 +40,7 @@ services
     .AddScoped(x => x.GetRequiredService<AppDbContext>().CreateLinqToDBContext())
     .AddKafka(configuration, options =>
     {
-        options.AddProducer<string, TestMessage>("test-topic");
+        options.AddProducer<string, MeasurementAdded>("measurementAdded");
     })
     .AddStackExchangeRedisCache(x =>
     {
@@ -50,7 +52,10 @@ services
     .AddSingleton<ClusterService>()
     .AddSingleton<IClusterService, ClusterService>()
     .AddHostedService<ClusterBackgroundService>()
-    .AddHostedService<StuckSendingBackgroundService>();
+    .AddHostedService<StuckSendingBackgroundService>()
+    .AddSingleton<TransactionScopeFactory>()
+    .AddScoped<MeasurementService>()
+    ;
 
 services.AddOptionsWithValidateOnStart<ClusterOptions>()
     .Bind(configuration.GetSection(ClusterOptions.ConfigSectionKey))
@@ -66,32 +71,21 @@ app.MapScalarApiReference();
 
 app.MapPost("produce", async (
     [FromQuery] int count,
-    IKafkaProducer<string, TestMessage> producer,
+    MeasurementService service,
+    TimeProvider timeProvider,
     CancellationToken token) =>
 {
-    const int chunkSize = 1000;
     var sw = Stopwatch.StartNew();
-    var records = new List<ProducerRecord<string, TestMessage>>(chunkSize);
-    foreach (var chunk in Enumerable.Range(0, count).Chunk(chunkSize))
-    {
-        records.Clear();
+    var random = new Random();
 
-        foreach (var _ in chunk)
+    var measurements = Enumerable.Range(0, count)
+        .Select(_ => new Measurement
         {
-            var key = Guid.NewGuid().ToString();
-            var message = new TestMessage(Guid.NewGuid(), Guid.NewGuid().ToString());
-            var headers = new Dictionary<string, string?>
-            {
-                ["H1"] = Guid.NewGuid().ToString(),
-                ["H2"] = Guid.NewGuid().ToString(),
-                ["H3"] = Guid.NewGuid().ToString()
-            };
+            Value = random.Next(),
+            CreatedAt = timeProvider.GetUtcNow()
+        });
 
-            records.Add(ProducerRecord.Create(key, message, headers));
-        }
-
-        await producer.ProduceAsync(records, token);
-    }
+    await service.AddRange(measurements, token);
 
     sw.Stop();
 
@@ -99,5 +93,3 @@ app.MapPost("produce", async (
 });
 
 app.Run();
-
-public sealed record TestMessage(Guid Id, string Message);
