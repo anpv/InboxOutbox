@@ -1,7 +1,8 @@
+using InboxOutbox.Implementations;
 using InboxOutbox.Options;
 using Microsoft.Extensions.Options;
 
-namespace InboxOutbox.Implementations;
+namespace InboxOutbox.BackgroundServices;
 
 public sealed class ClusterBackgroundService(
     ClusterService clusterService,

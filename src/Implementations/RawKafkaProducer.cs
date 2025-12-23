@@ -16,15 +16,14 @@ public sealed class RawKafkaProducer : IDisposable
     public RawKafkaProducer(IOptions<KafkaOptions> options, ILogger<RawKafkaProducer> logger)
     {
         _logger = logger;
-        _isTransactional = options.Value.IsTransactional;
+        _isTransactional = options.Value.Producer.IsTransactional;
         var config = new ProducerConfig
         {
             BootstrapServers = options.Value.BootstrapServers,
             EnableIdempotence = true,
             DeliveryReportFields = "none",
             MessageSendMaxRetries = 5,
-            TransactionalId = options.Value.TransactionalId,
-
+            TransactionalId = options.Value.Producer.TransactionalId,
         };
 
         _producer = new ProducerBuilder<byte[]?, byte[]?>(config)

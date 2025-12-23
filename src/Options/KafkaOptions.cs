@@ -6,7 +6,7 @@ public sealed class KafkaOptions
 
     public required string BootstrapServers { get; init; }
 
-    public required bool IsTransactional { get; init; }
+    public required ProducerOptions Producer { get; init; }
 
-    public required string? TransactionalId { get; init; }
+    public required ConsumerOptions Consumer { get; init; }
 }

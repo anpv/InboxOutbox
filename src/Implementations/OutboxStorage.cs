@@ -27,7 +27,7 @@ public sealed class OutboxStorage(IDataContext dataContext)
             .Where(x => x.Status == OutboxMessageStatus.Sending)
             .OrderBy(x => x.Id)
             .Take(count)
-            .ToArrayAsync(token);
+            .ToListAsync(token);
     }
 
     public async Task MarkAsPendingAsync(IEnumerable<long> messageIds, CancellationToken token)
@@ -37,7 +37,6 @@ public sealed class OutboxStorage(IDataContext dataContext)
             .Where(x => messageIds.Contains(x.Id))
             .Set(x => x.Status, OutboxMessageStatus.Pending)
             .Set(x => x.UpdatedAt, () => Sql.CurrentTzTimestamp)
-            .Set(x => x.InstanceId, (Guid?)null)
             .UpdateAsync(token);
     }
 

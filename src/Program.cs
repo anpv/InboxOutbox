@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using InboxOutbox.BackgroundServices;
 using InboxOutbox.Contracts;
 using InboxOutbox.Entities;
 using InboxOutbox.EntityFrameworkCore;
@@ -41,6 +42,7 @@ services
     .AddKafka(configuration, options =>
     {
         options.AddProducer<string, MeasurementAdded>("measurementAdded");
+        options.AddConsumer<MeasurementAdded, MeasurementAddedConsumer>("measurementAdded");
     })
     .AddStackExchangeRedisCache(x =>
     {

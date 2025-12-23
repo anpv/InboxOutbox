@@ -1,12 +1,13 @@
+using InboxOutbox.Implementations;
 using InboxOutbox.Options;
 using Microsoft.Extensions.Options;
 
-namespace InboxOutbox.Implementations;
+namespace InboxOutbox.BackgroundServices;
 
-public sealed class StuckSendingBackgroundService(
+public sealed class OutboxBackgroundService(
     IServiceScopeFactory serviceScopeFactory,
     IOptions<OutboxOptions> options,
-    ILogger<StuckSendingBackgroundService> logger)
+    ILogger<OutboxBackgroundService> logger)
     : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -30,7 +31,7 @@ public sealed class StuckSendingBackgroundService(
             }
             catch (Exception e)
             {
-                logger.LogError(e, "Failed to process stuck in sending staus messages");
+                logger.LogError(e, "Failed publish messages to Kafka");
                 await Task.Delay(options.Value.ErrorDelay, stoppingToken);
             }
         }
@@ -41,6 +42,6 @@ public sealed class StuckSendingBackgroundService(
         await using var scope = serviceScopeFactory.CreateAsyncScope();
         var processor = scope.ServiceProvider.GetRequiredService<OutboxProcessor>();
 
-        return await processor.ProcessInStuckAsync(token);
+        return await processor.ProcessAsync(token);
     }
 }
