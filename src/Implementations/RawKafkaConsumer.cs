@@ -188,9 +188,10 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
                     var consumeResult = consumer.Consume(mergedCts.Token);
                     consumeResults.Add(consumeResult);
                 }
-                catch (OperationCanceledException e) when (e.CancellationToken == mergedCts.Token)
+                catch (OperationCanceledException)
+                    when (timeoutCts.IsCancellationRequested && !token.IsCancellationRequested)
                 {
-                    // Ignore
+                    // Ignore, batch timeout
                 }
             }
 
