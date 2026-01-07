@@ -190,7 +190,7 @@ public static class ServiceCollectionExtensions
                     .AddKeyedSingleton(
                         topic,
                         (x, _) => new RawKafkaConsumer(
-                            [topic],
+                            topic,
                             x.GetRequiredService<IHostApplicationLifetime>(),
                             x.GetRequiredService<IOptions<KafkaOptions>>(),
                             x.GetRequiredService<ILogger<RawKafkaConsumer>>()))
@@ -213,19 +213,21 @@ public static class ServiceCollectionExtensions
 
     private sealed class InboxConsumerOptionsBuilder : ConsumerOptionsBuilder
     {
-        private readonly List<string> _topics = [];
-        
         public override void AddConsumer<TKey, TValue, TConsumer>(
             string topic,
             IKafkaDeserializer<TKey> keyDeserializer,
             IKafkaDeserializer<TValue> valueDeserializer)
         {
-            _topics.Add(topic);
-
             AddRegistration(services =>
             {
                 services
                     .AddTransient<IKafkaConsumer<TKey, TValue>, TConsumer>()
+                    .AddSingleton(
+                        x => new RawKafkaConsumer(
+                            topic,
+                            x.GetRequiredService<IHostApplicationLifetime>(),
+                            x.GetRequiredService<IOptions<KafkaOptions>>(),
+                            x.GetRequiredService<ILogger<RawKafkaConsumer>>()))
                     .AddKeyedScoped<IInboxConsumer>(
                         topic,
                         (x, _) => new InboxConsumer<TKey, TValue>(
@@ -239,11 +241,6 @@ public static class ServiceCollectionExtensions
         protected override void Register(IServiceCollection services)
         {
             services
-                .AddSingleton(x => new RawKafkaConsumer(
-                    _topics,
-                    x.GetRequiredService<IHostApplicationLifetime>(),
-                    x.GetRequiredService<IOptions<KafkaOptions>>(),
-                    x.GetRequiredService<ILogger<RawKafkaConsumer>>()))
                 .AddTransient<InboxStorage>()
                 .AddHostedService<InboxConsumingBackgroundService>()
                 .AddHostedService<InboxProcessingBackgroundService>()

@@ -19,14 +19,14 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
     private ImmutableHashSet<TopicPartition> _assignments = ImmutableHashSet<TopicPartition>.Empty;
 
     public RawKafkaConsumer(
-        IEnumerable<string> topics,
+        string topic,
         IHostApplicationLifetime appLifetime,
         IOptions<KafkaOptions> options,
         ILogger<RawKafkaConsumer> logger)
     {
         _logger = logger;
         _stoppingToken = appLifetime.ApplicationStopping;
-        _consumer = CreateConsumer(options.Value, topics);
+        _consumer = CreateConsumer(options.Value, topic);
         _consumeTask = Task.Factory.StartNew(Consume, state: this, TaskCreationOptions.LongRunning);
     }
 
@@ -110,7 +110,7 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
         }
     }
 
-    private RawConsumer CreateConsumer(KafkaOptions options, IEnumerable<string> topics)
+    private RawConsumer CreateConsumer(KafkaOptions options, string topic)
     {
         var consumerConfig = new ConsumerConfig
         {
@@ -146,7 +146,7 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
             })
             .Build();
 
-        consumer.Subscribe(topics.ToArray());
+        consumer.Subscribe(topic);
         
         return consumer;
     }

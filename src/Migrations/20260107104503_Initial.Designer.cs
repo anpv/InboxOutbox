@@ -12,18 +12,78 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace InboxOutbox.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20251117093529_AddExample")]
-    partial class AddExample
+    [Migration("20260107104503_Initial")]
+    partial class Initial
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "9.0.11")
+                .HasAnnotation("ProductVersion", "10.0.1")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityAlwaysColumns(modelBuilder);
+
+            modelBuilder.Entity("InboxOutbox.Entities.InboxMessage", b =>
+                {
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("Headers")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("headers");
+
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
+
+                    b.Property<byte[]>("Key")
+                        .HasColumnType("bytea")
+                        .HasColumnName("key");
+
+                    b.Property<long>("Offset")
+                        .HasColumnType("bigint")
+                        .HasColumnName("offset");
+
+                    b.Property<int>("Partition")
+                        .HasColumnType("integer")
+                        .HasColumnName("partition");
+
+                    b.Property<byte>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((byte)0)
+                        .HasColumnName("status");
+
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("topic");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<byte[]>("Value")
+                        .HasColumnType("bytea")
+                        .HasColumnName("value");
+
+                    b.HasIndex("Id", "Topic", "Partition")
+                        .HasDatabaseName("ix__inbox__id")
+                        .HasFilter("status in (0, 2)");
+
+                    b.ToTable("inbox", (string)null);
+
+                    b.HasAnnotation("Ext:Npgsql:PartitionByRange:Key", "created_at");
+                });
 
             modelBuilder.Entity("InboxOutbox.Entities.Measurement", b =>
                 {

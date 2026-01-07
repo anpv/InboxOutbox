@@ -11,7 +11,7 @@ namespace InboxOutbox.BackgroundServices;
 
 public sealed class InboxProcessingBackgroundService(
     IServiceScopeFactory serviceScopeFactory,
-    RawKafkaConsumer consumer,
+    IEnumerable<RawKafkaConsumer> consumers,
     IOptions<InboxOptions> options,
     ILogger<InboxProcessingBackgroundService> logger)
     : BackgroundService
@@ -26,15 +26,22 @@ public sealed class InboxProcessingBackgroundService(
 
         await using var registration = stoppingToken.Register(() =>
         {
-            consumer.AssignmentsAdded -= OnAdded;
-            consumer.AssignmentsRemoved -= OnRemoved;
-            OnTopicPartitionsRemoved(_workItemsByPartition.Keys.ToArray());
+            foreach (var consumer in consumers)
+            {
+                consumer.AssignmentsAdded -= OnAdded;
+                consumer.AssignmentsRemoved -= OnRemoved;
+                OnTopicPartitionsRemoved(_workItemsByPartition.Keys.ToArray());
+            }
+
             _completionChannel.Writer.Complete();
         });
 
-        consumer.AssignmentsAdded += OnAdded;
-        consumer.AssignmentsRemoved += OnRemoved;
-        OnTopicPartitionsAdded(consumer.Assignments, CreateWorkItem);
+        foreach (var consumer in consumers)
+        {
+            consumer.AssignmentsAdded += OnAdded;
+            consumer.AssignmentsRemoved += OnRemoved;
+            OnTopicPartitionsAdded(consumer.Assignments, CreateWorkItem);
+        }
 
         await WaitForWorkItemsCompleted();
 

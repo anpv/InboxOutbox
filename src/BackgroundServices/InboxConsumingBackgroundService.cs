@@ -10,7 +10,8 @@ namespace InboxOutbox.BackgroundServices;
 public sealed class InboxConsumingBackgroundService(
     TimeProvider timeProvider,
     IServiceScopeFactory serviceScopeFactory,
-    RawKafkaConsumer consumer,
+    IEnumerable<RawKafkaConsumer> consumers,
+    TransactionScopeFactory transactionScopeFactory,
     IOptions<InboxOptions> options,
     ILogger<InboxConsumingBackgroundService> logger) : BackgroundService
 {
@@ -18,19 +19,52 @@ public sealed class InboxConsumingBackgroundService(
     {
         await Task.Yield();
 
-        while (!stoppingToken.IsCancellationRequested)
+        var tasks = consumers.Select(x => RunAsync(x, stoppingToken));
+        var allTask = Task.WhenAll(tasks);
+
+        try
         {
-            if (await ConsumeBatchAsync(stoppingToken) is not { Count: > 0 } consumeResults)
+            await allTask;
+        }
+        catch
+        {
+            logger.LogError(allTask.Exception, "Consuming background service failed");
+        }
+    }
+
+    private async Task RunAsync(RawKafkaConsumer consumer, CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            if (await ConsumeBatchAsync(consumer, token) is not { Count: > 0 } consumeResults)
             {
                 continue;
             }
 
-            var isStored = await StoreAsync(consumeResults, stoppingToken);
-            await ConfirmAsync(isStored, stoppingToken);
+            try
+            {
+                using var transactionScope = transactionScopeFactory.Create();
+
+                await StoreAsync(consumeResults, token);
+                await consumer.CommitAsync(token);
+
+                transactionScope.Complete();
+            }
+            catch (OperationCanceledException e) when (e.CancellationToken == token)
+            {
+                // Ignore
+            }
+            catch (Exception e)
+            {
+                logger.LogError(e, "Store consume results failed");
+                await consumer.ResetAsync(token);
+            }
         }
     }
 
-    private async Task<IReadOnlyCollection<RawConsumeResult>> ConsumeBatchAsync(CancellationToken token)
+    private async Task<IReadOnlyCollection<RawConsumeResult>> ConsumeBatchAsync(
+        RawKafkaConsumer consumer,
+        CancellationToken token)
     {
         try
         {
@@ -47,44 +81,12 @@ public sealed class InboxConsumingBackgroundService(
         }
     }
 
-    private async Task<bool> StoreAsync(IReadOnlyCollection<RawConsumeResult> consumeResults, CancellationToken token)
+    private async Task StoreAsync(IReadOnlyCollection<RawConsumeResult> consumeResults, CancellationToken token)
     {
-        try
-        {
-            await using var scope = serviceScopeFactory.CreateAsyncScope();
-            var storage = scope.ServiceProvider.GetRequiredService<InboxStorage>();
-
-            var messages = consumeResults.Select(CreateMessage);
-            await storage.AddRangeAsync(messages, token);
-            
-            return true;
-        }
-        catch (Exception e)
-        {
-            if (e is not OperationCanceledException)
-            {
-                logger.LogError(e, "Store failed");
-            }
-
-            return false;
-        }
-    }
-
-    private async Task ConfirmAsync(bool isStored, CancellationToken token)
-    {
-        while (!token.IsCancellationRequested)
-        {
-            try
-            {
-                await (isStored ? consumer.CommitAsync(token) : consumer.ResetAsync(token));
-                
-                break;
-            }
-            catch (Exception e)
-            {
-                logger.LogError(e, "Confirm failed. Is stored={IsStored}", isStored);
-            }
-        }
+        await using var scope = serviceScopeFactory.CreateAsyncScope();
+        var storage = scope.ServiceProvider.GetRequiredService<InboxStorage>();
+        var messages = consumeResults.Select(CreateMessage);
+        await storage.AddRangeAsync(messages, token);
     }
 
     private InboxMessage CreateMessage(RawConsumeResult consumeResult) =>
