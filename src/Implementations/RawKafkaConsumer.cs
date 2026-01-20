@@ -10,11 +10,11 @@ namespace InboxOutbox.Implementations;
 
 public sealed class RawKafkaConsumer : IAsyncDisposable
 {
+    private readonly string _topic;
     private readonly ILogger<RawKafkaConsumer> _logger;
     private readonly CancellationToken _stoppingToken;
     private readonly RawConsumer _consumer;
     private readonly BufferBlock<ITask> _channel = new();
-    private readonly ConsumeSession _session = new();
     private readonly Task _consumeTask;
     private ImmutableHashSet<TopicPartition> _assignments = ImmutableHashSet<TopicPartition>.Empty;
 
@@ -24,6 +24,7 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
         IOptions<KafkaOptions> options,
         ILogger<RawKafkaConsumer> logger)
     {
+        _topic = topic;
         _logger = logger;
         _stoppingToken = appLifetime.ApplicationStopping;
         _consumer = CreateConsumer(options.Value, topic);
@@ -41,10 +42,8 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(_stoppingToken, token);
         var task = new ConsumeTask(_consumer, cts.Token);
         _ = await _channel.SendAsync(task, cts.Token);
-        var consumeResult = await task.Task;
-        _session.Add(consumeResult);
 
-        return consumeResult;
+        return await task.Task;
     }
 
     public async Task<IReadOnlyCollection<RawConsumeResult>> ConsumeBatchAsync(
@@ -55,20 +54,14 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(_stoppingToken, token);
         var task = new ConsumeBatchTask(_consumer, batchSize, batchTimeout, cts.Token);
         _ = await _channel.SendAsync(task, cts.Token);
-        var consumeResults = await task.Task;
 
-        if (consumeResults.Count > 0)
-        {
-            _session.Add(consumeResults[^1]);
-        }
-
-        return consumeResults;
+        return await task.Task;
     }
 
     public async Task CommitAsync(CancellationToken token)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(_stoppingToken, token);
-        var task = new CommitTask(_consumer, _session, cts.Token);
+        var task = new CommitTask(_consumer, cts.Token);
         _ = await _channel.SendAsync(task, cts.Token);
         await task.Task;
     }
@@ -76,7 +69,7 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
     public async Task ResetAsync(CancellationToken token)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(_stoppingToken, token);
-        var task = new ResetTask(_consumer, _session, cts.Token);
+        var task = new ResetTask(_consumer, _topic, cts.Token);
         _ = await _channel.SendAsync(task, cts.Token);
         await task.Task;
     }
@@ -147,7 +140,7 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
             .Build();
 
         consumer.Subscribe(topic);
-        
+
         return consumer;
     }
 
@@ -199,52 +192,32 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
         }
     }
 
-    private sealed class CommitTask(RawConsumer consumer, ConsumeSession session, CancellationToken token)
+    private sealed class CommitTask(RawConsumer consumer, CancellationToken token)
         : TaskCompletionSource, ITask
     {
         public void Run()
         {
-            if (!token.IsCancellationRequested && session.LastResult is { } lastResult)
+            if (!token.IsCancellationRequested)
             {
-                consumer.Commit(lastResult);
-                session.Reset();
+                consumer.Commit();
             }
 
             TrySetResult();
         }
     }
 
-    private sealed class ResetTask(RawConsumer consumer, ConsumeSession session, CancellationToken token)
+    private sealed class ResetTask(RawConsumer consumer, string topic, CancellationToken token)
         : TaskCompletionSource, ITask
     {
         public void Run()
         {
-            if (!token.IsCancellationRequested && session.FirstResult is { } firstResult)
+            if (!token.IsCancellationRequested)
             {
-                consumer.Seek(firstResult.TopicPartitionOffset);
-                session.Reset();
+                consumer.Unsubscribe();
+                consumer.Subscribe(topic);
             }
 
             TrySetResult();
-        }
-    }
-
-    private sealed class ConsumeSession
-    {
-        public RawConsumeResult? FirstResult { get; private set; }
-
-        public RawConsumeResult? LastResult { get; private set; }
-
-        public void Add(RawConsumeResult result)
-        {
-            FirstResult ??= result;
-            LastResult = result;
-        }
-
-        public void Reset()
-        {
-            FirstResult = null;
-            LastResult = null;
         }
     }
 }
