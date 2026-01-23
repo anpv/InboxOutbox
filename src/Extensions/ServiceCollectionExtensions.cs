@@ -191,7 +191,6 @@ public static class ServiceCollectionExtensions
                         topic,
                         (x, _) => new RawKafkaConsumer(
                             topic,
-                            x.GetRequiredService<IHostApplicationLifetime>(),
                             x.GetRequiredService<IOptions<KafkaOptions>>(),
                             x.GetRequiredService<ILogger<RawKafkaConsumer>>()))
                     .AddSingleton<IKafkaConsumerWorker>(x => new KafkaConsumerWorker<TKey, TValue>(
@@ -225,7 +224,6 @@ public static class ServiceCollectionExtensions
                     .AddSingleton(
                         x => new RawKafkaConsumer(
                             topic,
-                            x.GetRequiredService<IHostApplicationLifetime>(),
                             x.GetRequiredService<IOptions<KafkaOptions>>(),
                             x.GetRequiredService<ILogger<RawKafkaConsumer>>()))
                     .AddKeyedScoped<IInboxConsumer>(

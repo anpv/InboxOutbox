@@ -1,5 +1,5 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Threading.Tasks.Dataflow;
 using Confluent.Kafka;
 using InboxOutbox.Options;
 using Microsoft.Extensions.Options;
@@ -13,21 +13,15 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
     private readonly string _topic;
     private readonly KafkaOptions _options;
     private readonly ILogger<RawKafkaConsumer> _logger;
-    private readonly CancellationToken _stoppingToken;
-    private readonly BufferBlock<ITask> _channel = new();
+    private readonly BlockingCollection<ITask> _queue = new();
     private readonly Task _runTask;
     private ImmutableHashSet<TopicPartition> _assignments = ImmutableHashSet<TopicPartition>.Empty;
 
-    public RawKafkaConsumer(
-        string topic,
-        IHostApplicationLifetime appLifetime,
-        IOptions<KafkaOptions> options,
-        ILogger<RawKafkaConsumer> logger)
+    public RawKafkaConsumer(string topic, IOptions<KafkaOptions> options, ILogger<RawKafkaConsumer> logger)
     {
         _topic = topic;
         _options = options.Value;
         _logger = logger;
-        _stoppingToken = appLifetime.ApplicationStopping;
         _runTask = Task.Factory.StartNew(Run, TaskCreationOptions.LongRunning);
     }
 
@@ -39,9 +33,8 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
 
     public async Task<RawConsumeResult> ConsumeAsync(CancellationToken token)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(_stoppingToken, token);
-        var task = new ConsumeTask(cts.Token);
-        _ = await _channel.SendAsync(task, cts.Token);
+        var task = new ConsumeTask(token);
+        _queue.Add(task, token);
 
         return await task.Task;
     }
@@ -51,32 +44,29 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
         TimeSpan batchTimeout,
         CancellationToken token)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(_stoppingToken, token);
-        var task = new ConsumeBatchTask(batchSize, batchTimeout, cts.Token);
-        _ = await _channel.SendAsync(task, cts.Token);
+        var task = new ConsumeBatchTask(batchSize, batchTimeout, token);
+        _queue.Add(task, token);
 
         return await task.Task;
     }
 
     public async Task CommitAsync(CancellationToken token)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(_stoppingToken, token);
-        var task = new CommitTask(cts.Token);
-        _ = await _channel.SendAsync(task, cts.Token);
+        var task = new CommitTask(token);
+        _queue.Add(task, token);
         await task.Task;
     }
 
     public async Task ResetAsync(CancellationToken token)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(_stoppingToken, token);
-        var task = new ResetTask(cts.Token);
-        _ = await _channel.SendAsync(task, cts.Token);
+        var task = new ResetTask(token);
+        _queue.Add(task, token);
         await task.Task;
     }
 
     public async ValueTask DisposeAsync()
     {
-        _channel.Complete();
+        _queue.CompleteAdding();
         await _runTask;
     }
 
@@ -84,21 +74,18 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
     {
         RawConsumer? consumer = null;
         ConsumeSession? session = null;
-        
-        while (!_stoppingToken.IsCancellationRequested)
-        {
-            ITask? task = null;
 
+        foreach (var task in _queue.GetConsumingEnumerable())
+        {
             try
             {
-                task = _channel.Receive(_stoppingToken);
                 consumer ??= CreateConsumer();
                 session ??= new ConsumeSession();
                 task.Run(consumer, session);
             }
             catch (Exception e)
             {
-                task?.TrySetException(e);
+                task.TrySetException(e);
             }
         }
         
@@ -154,7 +141,8 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
         bool TrySetException(Exception exception);
     }
 
-    private sealed class ConsumeTask(CancellationToken token) : TaskCompletionSource<RawConsumeResult>, ITask
+    private sealed class ConsumeTask(CancellationToken token)
+        : TaskCompletionSource<RawConsumeResult>(TaskCreationOptions.RunContinuationsAsynchronously), ITask
     {
         public void Run(RawConsumer consumer, ConsumeSession session)
         {
@@ -165,7 +153,7 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
     }
 
     private sealed class ConsumeBatchTask(int batchSize, TimeSpan batchTimeout, CancellationToken token)
-        : TaskCompletionSource<IReadOnlyList<RawConsumeResult>>, ITask
+        : TaskCompletionSource<IReadOnlyList<RawConsumeResult>>(TaskCreationOptions.RunContinuationsAsynchronously), ITask
     {
         public void Run(RawConsumer consumer, ConsumeSession session)
         {
@@ -184,8 +172,7 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
                 catch (OperationCanceledException)
                     when (timeoutCts.IsCancellationRequested && !token.IsCancellationRequested)
                 {
-                    // Ignore, batch timeout
-                    break;
+                    break; // Ignore, batch timeout
                 }
             }
 
@@ -193,7 +180,8 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
         }
     }
 
-    private sealed class CommitTask(CancellationToken token) : TaskCompletionSource, ITask
+    private sealed class CommitTask(CancellationToken token)
+        : TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), ITask
     {
         public void Run(RawConsumer consumer, ConsumeSession session)
         {
@@ -208,7 +196,8 @@ public sealed class RawKafkaConsumer : IAsyncDisposable
         }
     }
 
-    private sealed class ResetTask(CancellationToken token) : TaskCompletionSource, ITask
+    private sealed class ResetTask(CancellationToken token)
+        : TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), ITask
     {
         public void Run(RawConsumer consumer, ConsumeSession session)
         {
