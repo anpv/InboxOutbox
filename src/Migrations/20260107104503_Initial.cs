@@ -10,9 +10,7 @@ namespace InboxOutbox.Migrations
     /// <inheritdoc />
     public partial class Initial : Migration
     {
-        private const int fromYear = 2026;
-        private const int fromMonth = 1;
-        private const int numberOfMonths = 6;
+        private readonly MonthlyRange _firstHalfOfYear2026 = new(FromYear: 2026, FromMonth: 1, NumberOfMonths: 6);
         
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -84,15 +82,15 @@ namespace InboxOutbox.Migrations
                 column: "id",
                 filter: "status in (0, 1)");
             
-            migrationBuilder.CreateMonthlyPartitions("outbox", null, fromYear, fromMonth, numberOfMonths);
-            migrationBuilder.CreateMonthlyPartitions("inbox", null, fromYear, fromMonth, numberOfMonths);
+            migrationBuilder.CreateMonthlyPartitions("outbox", null, _firstHalfOfYear2026);
+            migrationBuilder.CreateMonthlyPartitions("inbox", null, _firstHalfOfYear2026);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropMonthlyPartitions("inbox", null, fromYear, fromMonth, numberOfMonths);
-            migrationBuilder.DropMonthlyPartitions("outbox", null, fromYear, fromMonth, numberOfMonths);
+            migrationBuilder.DropMonthlyPartitions("inbox", null, _firstHalfOfYear2026);
+            migrationBuilder.DropMonthlyPartitions("outbox", null, _firstHalfOfYear2026);
             
             migrationBuilder.DropTable(
                 name: "inbox");

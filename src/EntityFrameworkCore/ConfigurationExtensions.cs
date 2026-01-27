@@ -41,17 +41,10 @@ public static class ConfigurationExtensions
             return new OperationBuilder<CreateRangePartitionOperation>(operation);
         }
 
-        public void CreateMonthlyPartitions(
-            string name,
-            string? schema,
-            int fromYear,
-            int fromMonth,
-            int numberOfMonths)
+        public void CreateMonthlyPartitions(string name, string? schema, MonthlyRange range)
         {
-            for (var i = 0; i < numberOfMonths; i++)
+            foreach (var date in range)
             {
-                var date = new DateTime(fromYear, fromMonth, 1).AddMonths(i);
-                
                 builder.CreateRangePartition(
                     $"{name}_{date:yyyyMM}",
                     schema,
@@ -75,17 +68,10 @@ public static class ConfigurationExtensions
             return new OperationBuilder<DropPartitionOperation>(operation);
         }
 
-        public void DropMonthlyPartitions(
-            string name,
-            string? schema,
-            int fromYear,
-            int fromMonth,
-            int numberOfMonths)
+        public void DropMonthlyPartitions(string name, string? schema, MonthlyRange range)
         {
-            for (var i = numberOfMonths - 1; i >= 0; i--)
+            foreach (var date in range.Reverse())
             {
-                var date = new DateTime(fromYear, fromMonth, 1).AddMonths(i);
-
                 builder.DropPartition($"{name}_{date:yyyyMM}", schema);
             }
         }
